@@ -143,7 +143,7 @@ st.markdown("""
 # ─────────────────────────────────────────────────────────────────────────────
 
 TEMPLATE_COLS    = ["date", "brand", "sub_brand", "qty"]
-SAMPLE_DATA_PATH = "/Users/jale/Documents/Sample_Forecast_1/sample_5_years.csv"
+SAMPLE_DATA_PATH = "sample_data.csv"
 
 REPORTS = [
     "📊 Data Overview",
