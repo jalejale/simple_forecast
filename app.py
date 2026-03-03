@@ -708,3 +708,13 @@ st.markdown(
     "</p>",
     unsafe_allow_html=True,
 )
+
+if __name__ == "__main__":
+    import os
+    import sys
+
+    print("\n   🚀 Starting Forecasting App...")
+    print("   🌐 View your app in your browser at: http://localhost:8501\n")
+    
+    # Run the streamlit application natively
+    os.system(f"{sys.executable} -m streamlit run {sys.argv[0]}")
