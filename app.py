@@ -712,9 +712,12 @@ st.markdown(
 if __name__ == "__main__":
     import os
     import sys
+    import streamlit.runtime as st_runtime
 
-    print("\n   🚀 Starting Forecasting App...")
-    print("   🌐 View your app in your browser at: http://localhost:8501\n")
-    
-    # Run the streamlit application natively
-    os.system(f"{sys.executable} -m streamlit run {sys.argv[0]}")
+    # Only launch a new Streamlit server if one isn't already running
+    if not st_runtime.exists():
+        print("\n   🚀 Starting Forecasting App...")
+        print("   🌐 View your app in your browser at: http://localhost:8501\n")
+        
+        # Run the streamlit application natively
+        os.system(f"{sys.executable} -m streamlit run {sys.argv[0]}")
