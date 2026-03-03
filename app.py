@@ -1,142 +1,23 @@
 """
-app.py — Python Forecasting App (Browser-based via Streamlit)
+app.py — Python Forecasting App (Dash)
 Template: date, brand, sub_brand, qty
 
-Features:
-  - Upload CSV/Excel using the standard template (date, brand, sub_brand, qty)
-  - Download blank CSV template
-  - Cascading Brand → Sub-Brand filter
-  - Report selector in sidebar — sidebar only shows relevant settings
-  - 6 forecasting models: Moving Average, SES, Holt, Holt-Winters, SARIMA, Auto ARIMA
-  - Seasonal decomposition
-  - Interactive Plotly charts with 95% confidence intervals
-  - Accuracy metrics (MAE, RMSE, MAPE)
-  - Export forecast to Excel
+Run: python app.py
+Opens: http://localhost:8050
 """
 
 import io
-import streamlit as st
-import pandas as pd
-import numpy as np
+import base64
+
+import dash
+from dash import dcc, html, dash_table, Input, Output, State, ctx
+from dash.exceptions import PreventUpdate
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import pandas as pd
+import numpy as np
 
 import forecasting as fc
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PAGE CONFIG
-# ─────────────────────────────────────────────────────────────────────────────
-
-st.set_page_config(
-    page_title="📈 Forecasting App",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CUSTOM CSS
-# ─────────────────────────────────────────────────────────────────────────────
-
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-
-    /* Modern Dark Theme Base */
-    .stApp {
-        background-color: #0e1117;
-        color: #f7f9fc;
-    }
-    
-    /* Clean Sidebar */
-    section[data-testid="stSidebar"] {
-        background-color: #1a1e23;
-        border-right: 1px solid rgba(255,255,255,0.08);
-    }
-    
-    /* Sleek Metric Cards */
-    .metric-card {
-        background: #1f232b;
-        border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 12px;
-        padding: 20px 24px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        transition: transform 0.2s ease, border-color 0.2s ease;
-    }
-    .metric-card:hover { 
-        transform: translateY(-2px); 
-        border-color: #6366f1;
-    }
-    .metric-card h3 { margin:0; font-size:0.8rem; color:#94a3b8; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; }
-    .metric-card h2 { margin:8px 0 0; font-size:1.8rem; font-weight:700; color:#f8fafc; }
-
-    /* App Typography */
-    .app-title {
-        color: #f8fafc;
-        font-size: 2.2rem;
-        font-weight: 700;
-        margin-bottom: 0;
-        padding-bottom: 0;
-    }
-    .app-subtitle { color: #94a3b8; font-size: 1rem; margin-top: 4px; }
-
-    /* Filter Badges */
-    .filter-badge {
-        display: inline-block;
-        background: rgba(99, 102, 241, 0.15);
-        border: 1px solid rgba(99, 102, 241, 0.4);
-        border-radius: 6px;
-        padding: 4px 12px;
-        font-size: 0.85rem;
-        color: #c7d2fe;
-        margin-right: 8px;
-        margin-bottom: 12px;
-        font-weight: 500;
-    }
-
-    /* Primary Buttons */
-    .stButton > button {
-        background-color: #6366f1;
-        color: white; 
-        border: none; 
-        border-radius: 8px;
-        font-weight: 600;
-        transition: background-color 0.2s ease;
-    }
-    .stButton > button:hover { background-color: #4f46e5; color: white; }
-
-    .stDownloadButton > button {
-        background-color: #10b981;
-        color: white; border: none; border-radius: 8px;
-        font-weight: 600; transition: background-color 0.2s ease;
-    }
-    .stDownloadButton > button:hover { background-color: #059669; color: white; }
-
-    /* Alerts / Callouts */
-    .stInfo { background-color: rgba(99, 102, 241, 0.1) !important; color: #e0e7ff !important; border: 1px solid rgba(99,102,241,0.3) !important; border-radius: 8px !important; }
-    .stSuccess { background-color: rgba(16, 185, 129, 0.1) !important; color: #d1fae5 !important; border: 1px solid rgba(16,185,129,0.3) !important; border-radius: 8px !important; }
-    .stWarning { background-color: rgba(245, 158, 11, 0.1) !important; color: #fef3c7 !important; border: 1px solid rgba(245,158,11,0.3) !important; border-radius: 8px !important; }
-
-    hr { border-color: rgba(255,255,255,0.08); }
-    
-    /* Make native tabs beautiful */
-    div[data-testid="stTabs"] button {
-        font-size: 0.95rem;
-        font-weight: 500;
-        color: #94a3b8;
-    }
-    div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {
-        color: #6366f1;
-        font-weight: 600;
-    }
-    
-    /* Make tab labels highly visible */
-    p {
-        color: #e2e8f0;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONSTANTS
@@ -144,17 +25,6 @@ st.markdown("""
 
 TEMPLATE_COLS    = ["date", "brand", "sub_brand", "qty"]
 SAMPLE_DATA_PATH = "sample_data.csv"
-
-REPORTS = [
-    "📊 Data Overview",
-    "📉 Moving Average",
-    "🔵 SES",
-    "📐 Holt's Linear",
-    "❄️ Holt-Winters",
-    "🤖 SARIMA",
-    "🔮 Auto ARIMA",
-    "🔀 Decomposition",
-]
 
 COLORS = {
     "actual":   "#a5b4fc",
@@ -164,6 +34,28 @@ COLORS = {
     "trend":    "#f64f59",
     "seasonal": "#667eea",
     "resid":    "#fb923c",
+}
+
+PALETTE = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
+
+FREQ_MAP = {
+    "Monthly (MS)":   "MS",
+    "Daily (D)":      "D",
+    "Weekly (W)":     "W",
+    "Quarterly (QS)": "QS",
+}
+
+METRIC_HINTS = {
+    "MAE": "Mean Absolute Error: The average absolute difference between forecast and actuals. Lower is better.",
+    "RMSE": "Root Mean Squared Error: The square root of average squared errors. Penalizes larger errors more than MAE. Lower is better.",
+    "MAPE": "Mean Absolute Percentage Error: The average percentage difference between forecast and actuals. Lower is better.",
+    "OBSERVATIONS": "Total number of recorded data points in this historical series.",
+    "MIN QTY": "The lowest recorded quantity in the historical data.",
+    "MAX QTY": "The highest recorded quantity in the historical data.",
+    "MEAN QTY": "The average quantity over the historical data.",
+    "TREND STRENGTH": "Measures how much variance is explained by the trend (0 to 1). Higher = stronger trend.",
+    "SEASONAL STRENGTH": "Measures how much variance is explained by seasonality (0 to 1). Higher = stronger seasonality.",
+    "RESIDUAL STD": "Standard deviation of the residuals (noise/error). Lower means the model captures more signal."
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -185,20 +77,65 @@ def to_excel_bytes(df: pd.DataFrame) -> bytes:
     return buf.getvalue()
 
 
-def metrics_html(metrics: dict, cols: int = 3) -> str:
-    items = "".join(
-        f'<div class="metric-card"><h3>{k}</h3><h2>{v}</h2></div>'
-        for k, v in metrics.items()
+def parse_uploaded(contents, filename):
+    """Decode a dcc.Upload content string into a DataFrame."""
+    content_type, content_string = contents.split(",")
+    decoded = base64.b64decode(content_string)
+    name = filename.lower()
+    if name.endswith(".csv"):
+        df = pd.read_csv(io.StringIO(decoded.decode("utf-8")))
+    elif name.endswith((".xlsx", ".xls")):
+        df = pd.read_excel(io.BytesIO(decoded))
+    else:
+        raise ValueError("Unsupported file format.")
+    df.columns = [c.strip().lower() for c in df.columns]
+    missing = [c for c in TEMPLATE_COLS if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing columns: {missing}")
+    df["date"] = pd.to_datetime(df["date"])
+    df["qty"]  = pd.to_numeric(df["qty"], errors="coerce")
+    return df
+
+
+def load_sample() -> pd.DataFrame:
+    df = pd.read_csv(SAMPLE_DATA_PATH)
+    df.columns = [c.strip().lower() for c in df.columns]
+    df["date"] = pd.to_datetime(df["date"])
+    return df
+
+
+def get_series(df: pd.DataFrame, brand: str, sub_brand: str, freq: str) -> pd.Series:
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"])
+    mask = (df["brand"] == brand) & (df["sub_brand"] == sub_brand)
+    filtered = df[mask].copy().sort_values("date").set_index("date")["qty"]
+    filtered.index = pd.DatetimeIndex(filtered.index)
+    return filtered.asfreq(freq).interpolate()
+
+
+def dark_layout_kwargs(height=420, title_text=None):
+    kwargs = dict(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(255,255,255,0.03)",
+        xaxis=dict(gridcolor="rgba(255,255,255,0.08)", color="#a5b4fc"),
+        yaxis=dict(gridcolor="rgba(255,255,255,0.08)", color="#a5b4fc"),
+        legend=dict(bgcolor="rgba(0,0,0,0.4)", bordercolor="rgba(255,255,255,0.1)",
+                    font=dict(color="#e8eaf6")),
+        hovermode="x unified",
+        height=height,
+        margin=dict(t=50 if title_text else 20, b=40, l=50, r=20),
+        font=dict(family="Inter, sans-serif", color="#e8eaf6"),
     )
-    return (f'<div style="display:grid;grid-template-columns:repeat({cols},1fr);'
-            f'gap:12px;margin-bottom:16px">{items}</div>')
+    if title_text:
+        kwargs["title"] = dict(text=f"<b>{title_text}</b>",
+                               font=dict(color="#e8eaf6", size=16))
+    return kwargs
 
 
-def make_forecast_figure(series, result, title):
+def forecast_figure(series, result, title):
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=series.index, y=series.values,
-        name="Actual", mode="lines+markers",
+        x=series.index, y=series.values, name="Actual", mode="lines+markers",
         line=dict(color=COLORS["actual"], width=2), marker=dict(size=5),
     ))
     fitted = result.get("fitted")
@@ -215,509 +152,959 @@ def make_forecast_figure(series, result, title):
             fill="toself", fillcolor=COLORS["ci"],
             line=dict(color="rgba(0,0,0,0)"), name="95% CI",
         ))
-    if fc_val is not None:
         fig.add_trace(go.Scatter(
-            x=fc_val.index, y=fc_val.values,
-            name="Forecast", mode="lines+markers",
+            x=fc_val.index, y=fc_val.values, name="Forecast", mode="lines+markers",
             line=dict(color=COLORS["forecast"], width=2.5),
             marker=dict(size=6, symbol="diamond"),
         ))
     fig.add_vline(x=series.index[-1], line_dash="dash",
                   line_color="rgba(255,255,255,0.3)", line_width=1)
-    fig.update_layout(
-        title=dict(text=f"<b>{title}</b>", font=dict(color="#e8eaf6", size=16)),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(255,255,255,0.03)",
-        xaxis=dict(gridcolor="rgba(255,255,255,0.08)", color="#a5b4fc"),
-        yaxis=dict(gridcolor="rgba(255,255,255,0.08)", color="#a5b4fc"),
-        legend=dict(bgcolor="rgba(0,0,0,0.3)", bordercolor="rgba(255,255,255,0.1)",
-                    font=dict(color="#e8eaf6")),
-        hovermode="x unified", height=430,
-        margin=dict(t=50, b=40, l=50, r=20),
-    )
+    fig.update_layout(**dark_layout_kwargs(title_text=title))
     return fig
 
 
-def make_decomp_figure(decomp_result):
-    fig = make_subplots(rows=4, cols=1,
-                        subplot_titles=["Observed", "Trend", "Seasonal", "Residuals"],
-                        shared_xaxes=True, vertical_spacing=0.07)
-    for s, color, row in [
-        (decomp_result.observed, COLORS["actual"], 1),
-        (decomp_result.trend,    COLORS["trend"],   2),
-        (decomp_result.seasonal, COLORS["seasonal"], 3),
-        (decomp_result.resid,    COLORS["resid"],   4),
-    ]:
-        fig.add_trace(go.Scatter(x=s.index, y=s.values, mode="lines",
-                                 line=dict(color=color, width=1.8), showlegend=False),
-                      row=row, col=1)
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)",
-                      plot_bgcolor="rgba(255,255,255,0.03)",
-                      height=680, margin=dict(t=30, b=30, l=50, r=20))
-    for ax in fig.layout:
-        if "xaxis" in ax or "yaxis" in ax:
-            fig.layout[ax].update(gridcolor="rgba(255,255,255,0.08)", color="#a5b4fc")
-    for ann in fig.layout.annotations:
-        ann.font.color = "#a5b4fc"
-    return fig
-
-
-def render_standard_forecast(label, run_fn, series, periods, extra_kwargs=None,
-                              needs_button=False, btn_key=None):
-    if extra_kwargs is None:
-        extra_kwargs = {}
-
-    def _run():
-        with st.spinner(f"Fitting {label}..."):
-            try:
-                result = run_fn(series, periods=periods, **extra_kwargs)
-                st.markdown(metrics_html(result["metrics"]), unsafe_allow_html=True)
-                fc_df = pd.DataFrame({
-                    "Forecast": result["forecast"],
-                    "Lower 95%": result["lower"],
-                    "Upper 95%": result["upper"],
-                })
-                st.plotly_chart(
-                    make_forecast_figure(series, result, f"{label} — {periods}-Period Forecast"),
-                    use_container_width=True,
-                )
-                with st.expander("📋 Forecast Table"):
-                    st.dataframe(fc_df.style.format("{:.2f}"), use_container_width=True)
-                st.download_button(
-                    "⬇️ Download Forecast (Excel)", to_excel_bytes(fc_df),
-                    f"{(btn_key or label).lower().replace(' ','_')}_forecast.xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"dl_{btn_key or label}",
-                )
-                if "summary" in result:
-                    with st.expander("📄 Model Summary"):
-                        st.code(result["summary"], language="text")
-            except Exception as e:
-                st.error(f"{label} error: {e}")
-
-    if needs_button:
-        if st.button(f"🚀 Run {label}", key=f"btn_{btn_key or label}"):
-            _run()
-        else:
-            st.info(f"📌 Adjust parameters in the sidebar, then click **Run {label}**.")
-    else:
-        _run()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# DATA LOADING
-# ─────────────────────────────────────────────────────────────────────────────
-
-@st.cache_data
-def load_sample():
-    df = pd.read_csv(SAMPLE_DATA_PATH)
-    df.columns = [c.strip().lower() for c in df.columns]
-    df["date"] = pd.to_datetime(df["date"])
-    return df
-
-
-def load_uploaded(file):
-    name = file.name.lower()
-    if name.endswith(".csv"):
-        df = pd.read_csv(file)
-    elif name.endswith((".xlsx", ".xls")):
-        df = pd.read_excel(file)
-    else:
-        raise ValueError("Unsupported format.")
-    df.columns = [c.strip().lower() for c in df.columns]
-    missing = [c for c in TEMPLATE_COLS if c not in df.columns]
-    if missing:
-        raise ValueError(f"Missing columns: {missing}. Required: {TEMPLATE_COLS}")
-    df["date"] = pd.to_datetime(df["date"])
-    df["qty"]  = pd.to_numeric(df["qty"], errors="coerce")
-    return df
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR
-# ─────────────────────────────────────────────────────────────────────────────
-
-with st.sidebar:
-    st.markdown("## 📈 Forecasting App")
-    st.markdown("---")
-
-    # ── Template Download ────────────────────────────────────────────────────
-    st.markdown("### 📄 Template")
-    st.download_button(
-        "⬇️ Download CSV Template",
-        data=blank_template_bytes(),
-        file_name="forecast_template.csv",
-        mime="text/csv",
-    )
-    st.caption("`date` · `brand` · `sub_brand` · `qty`")
-    st.markdown("---")
-
-    # ── Data Source ──────────────────────────────────────────────────────────
-    st.markdown("### 📂 Data Source")
-    data_source = st.radio("", ["Use Sample Data", "Upload File"],
-                           label_visibility="collapsed")
-
-    raw_df = None
-    if data_source == "Upload File":
-        uploaded = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx", "xls"])
-        if uploaded:
-            try:
-                raw_df = load_uploaded(uploaded)
-                st.success(f"✔ {len(raw_df)} rows loaded")
-            except Exception as e:
-                st.error(str(e))
-    else:
-        raw_df = load_sample()
-        st.info(f"ℹ Sample: {len(raw_df)} rows | 2019–2023")
-
-    # ── Brand / Sub-Brand Filter ─────────────────────────────────────────────
-    series = None
-    selected_brand = None
-    selected_sub_brand = None
-    sub_brands = []
-
-    if raw_df is not None:
-        st.markdown("### 🏷️ Filter")
-        brands = sorted(raw_df["brand"].dropna().unique().tolist())
-        selected_brand = st.selectbox("Brand", brands)
-
-        sub_brands = sorted(
-            raw_df.loc[raw_df["brand"] == selected_brand, "sub_brand"]
-            .dropna().unique().tolist()
-        )
-        selected_sub_brand = st.selectbox("Sub-Brand", sub_brands)
-
-        freq_map = {
-            "Monthly (MS)":   "MS",
-            "Daily (D)":      "D",
-            "Weekly (W)":     "W",
-            "Quarterly (QS)": "QS",
-        }
-        freq_label = st.selectbox("Frequency", list(freq_map.keys()))
-        freq = freq_map[freq_label]
-
-        mask = (
-            (raw_df["brand"] == selected_brand) &
-            (raw_df["sub_brand"] == selected_sub_brand)
-        )
-        filtered = raw_df[mask].copy().sort_values("date").set_index("date")["qty"]
-        try:
-            series = filtered.asfreq(freq).interpolate()
-        except Exception as e:
-            st.error(f"Frequency error: {e}")
-
-
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# MAIN CONTENT
-# ─────────────────────────────────────────────────────────────────────────────
-
-st.markdown('<p class="app-title">📈 Time Series Forecasting</p>', unsafe_allow_html=True)
-st.markdown(
-    '<p class="app-subtitle">Select a report tab below to configure and view forecasts</p>',
-    unsafe_allow_html=True,
-)
-st.markdown("---")
-
-if series is None or series.dropna().empty:
-    st.warning("⚠️ Please load data using the sidebar.")
-    st.stop()
-
-# Active filter badges
-st.markdown(
-    f'<div style="margin-bottom:12px">'
-    f'<span class="filter-badge">🏷️ Brand: <b>{selected_brand}</b></span>'
-    f'<span class="filter-badge">📦 Sub-Brand: <b>{selected_sub_brand}</b></span>'
-    f'<span class="filter-badge">📅 {len(series.dropna())} obs</span>'
-    f'</div>',
-    unsafe_allow_html=True,
-)
-
-# Render actual Streamlit Tabs
-tabs = st.tabs(REPORTS)
-
-# ── 📊 Data Overview ─────────────────────────────────────────────────────────
-with tabs[0]:
-    s_stat = [
-        ("Observations", str(len(series.dropna()))),
-        ("Min Qty",  f"{series.min():,.0f}"),
-        ("Max Qty",  f"{series.max():,.0f}"),
-        ("Mean Qty", f"{series.mean():,.1f}"),
+def metrics_div(metrics: dict, cols: int = 3):
+    cards = [
+        html.Div([
+            html.H3([k, " ", html.Span("ℹ️", title=METRIC_HINTS.get(k, ""), style={"cursor": "help", "opacity": 0.6})]),
+            html.H2(str(v)),
+        ], className="metric-card")
+        for k, v in metrics.items()
     ]
-    for col, (label, value) in zip(st.columns(4), s_stat):
-        with col:
-            st.markdown(
-                f'<div class="metric-card"><h3>{label}</h3><h2>{value}</h2></div>',
-                unsafe_allow_html=True,
-            )
-    st.markdown("<br>", unsafe_allow_html=True)
+    return html.Div(cards, className="metrics-grid")
+
+
+def forecast_div(series, result, label, periods, dl_id):
+    """Return the standard forecast output: metrics + chart + table + download."""
+    met = result.get("metrics", {})
+    fc_df = pd.DataFrame({
+        "Forecast":  result["forecast"],
+        "Lower 95%": result["lower"],
+        "Upper 95%": result["upper"],
+    }).reset_index()
+    fc_df.columns = ["Date", "Forecast", "Lower 95%", "Upper 95%"]
+    fc_df["Date"] = fc_df["Date"].astype(str)
+
+    return html.Div([
+        metrics_div(met),
+        dcc.Graph(
+            figure=forecast_figure(series, result, f"{label} — {periods}-Period Forecast"),
+            config={"displayModeBar": False},
+        ),
+        html.Details([
+            html.Summary("📋 Forecast Table", style={"cursor": "pointer", "color": "#94a3b8",
+                                                       "fontSize": "0.9rem", "marginBottom": "8px"}),
+            dash_table.DataTable(
+                data=fc_df.round(2).to_dict("records"),
+                columns=[{"name": c, "id": c} for c in fc_df.columns],
+                style_header={"backgroundColor": "#374151", "color": "#94a3b8",
+                              "fontWeight": "600", "fontSize": "0.78rem"},
+                style_data={"backgroundColor": "#1f2937", "color": "#e2e8f0", "fontSize": "0.85rem"},
+                style_cell={"border": "1px solid rgba(255,255,255,0.08)"},
+                page_size=12,
+            ),
+        ], style={"marginTop": "10px"}),
+        html.Div([
+            html.Button("⬇️ Download Forecast (Excel)", id=dl_id,
+                        className="btn-primary",
+                        style={"marginTop": "14px"}),
+            dcc.Download(id=f"{dl_id}-download"),
+        ]),
+    ])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# APP
+# ─────────────────────────────────────────────────────────────────────────────
+
+app = dash.Dash(
+    __name__,
+    title="📈 Forecasting App",
+    suppress_callback_exceptions=True,
+)
+server = app.server   # expose Flask server for deployment
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LAYOUT
+# ─────────────────────────────────────────────────────────────────────────────
+
+def sidebar():
+    return html.Div(id="sidebar", children=[
+        html.H2("📈 Forecasting App"),
+        html.Hr(className="side-divider"),
+
+        # ── Template ──
+        html.P("📄 TEMPLATE", className="side-section-title"),
+        html.Button("⬇️ Download CSV Template", id="btn-template",
+                    className="btn-download"),
+        dcc.Download(id="download-template"),
+        html.P("`date` · `brand` · `sub_brand` · `qty`", className="side-caption"),
+        html.Hr(className="side-divider"),
+
+        # ── Data Source ──
+        html.P("📂 DATA SOURCE", className="side-section-title"),
+        dcc.RadioItems(
+            id="data-source",
+            options=[
+                {"label": " Use Sample Data", "value": "sample"},
+                {"label": " Upload File",      "value": "upload"},
+            ],
+            value="sample",
+            className="radio-group",
+            labelStyle={"display": "block", "marginBottom": "6px"},
+        ),
+        dcc.Upload(
+            id="upload-box",
+            children=html.Div("📁 Drag & drop or click to upload CSV / Excel"),
+            accept=".csv,.xlsx,.xls",
+            style={"display": "none"},
+        ),
+        html.Div(id="upload-info"),
+        html.Hr(className="side-divider"),
+
+        # ── Filters ──
+        html.P("🏷️ FILTER", className="side-section-title"),
+        html.Label("Brand", className="side-section-title"),
+        dcc.Dropdown(id="brand-dd", clearable=False,
+                     style={"marginBottom": "10px"}),
+        html.Label("Sub-Brand", className="side-section-title"),
+        dcc.Dropdown(id="subbrand-dd", clearable=False,
+                     style={"marginBottom": "10px"}),
+        html.Label("Frequency", className="side-section-title"),
+        dcc.Dropdown(
+            id="freq-dd",
+            options=[{"label": k, "value": v} for k, v in FREQ_MAP.items()],
+            value="MS", clearable=False,
+        ),
+
+        # Hidden data store
+        dcc.Store(id="store-df"),
+    ])
+
+
+def main_content():
+    return html.Div(id="main-content", children=[
+        html.P("📈 Time Series Forecasting", className="app-title"),
+        html.P("Select a report tab below to configure and view forecasts", className="app-subtitle"),
+
+        # Active filter badges (updated by callback)
+        html.Div(id="filter-badges", className="filter-badges"),
+
+        # ── Tabs ──
+        dcc.Tabs(id="report-tabs", value="tab-overview", className="custom-tabs", children=[
+            dcc.Tab(label="📊 Data Overview",   value="tab-overview",     className="tab", selected_className="tab--selected"),
+            dcc.Tab(label="📉 Moving Average",  value="tab-ma",           className="tab", selected_className="tab--selected"),
+            dcc.Tab(label="🔵 SES",             value="tab-ses",          className="tab", selected_className="tab--selected"),
+            dcc.Tab(label="📐 Holt's Linear",   value="tab-holt",         className="tab", selected_className="tab--selected"),
+            dcc.Tab(label="❄️ Holt-Winters",    value="tab-hw",           className="tab", selected_className="tab--selected"),
+            dcc.Tab(label="🤖 SARIMA",          value="tab-sarima",       className="tab", selected_className="tab--selected"),
+            dcc.Tab(label="🔮 Auto ARIMA",      value="tab-auto-arima",   className="tab", selected_className="tab--selected"),
+            dcc.Tab(label="🔀 Decomposition",   value="tab-decomp",       className="tab", selected_className="tab--selected"),
+        ]),
+
+        # Dynamic content for fast tabs
+        html.Div(id="tab-content", className="tab-content"),
+        
+        # Persistent containers for slow tabs
+        html.Div(id="tab-sarima-container", className="tab-content", style={"display": "none"}, children=[sarima_tab()]),
+        html.Div(id="tab-aa-container", className="tab-content", style={"display": "none"}, children=[auto_arima_tab()]),
+
+        html.Div([
+            html.P("Python Forecasting App · Template: date | brand | sub_brand | qty")
+        ], id="footer"),
+    ])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CALLBACKS
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Toggle upload box visibility ──────────────────────────────────────────────
+@app.callback(
+    Output("upload-box", "style"),
+    Input("data-source", "value"),
+)
+def toggle_upload(source):
+    if source == "upload":
+        return {"display": "block"}
+    return {"display": "none"}
+
+
+# ── Load raw data into store ───────────────────────────────────────────────────
+@app.callback(
+    Output("store-df", "data"),
+    Output("upload-info", "children"),
+    Input("data-source", "value"),
+    Input("upload-box", "contents"),
+    State("upload-box", "filename"),
+)
+def load_data(source, contents, filename):
+    if source == "sample":
+        df = load_sample()
+        df["date"] = df["date"].astype(str)  # serialize date as string for Store
+        info = html.Div(f"ℹ Sample: {len(df)} rows | 2019–2023", className="data-info")
+        return df.to_json(date_format="iso", orient="split"), info
+    if contents:
+        try:
+            df = parse_uploaded(contents, filename)
+            df["date"] = df["date"].astype(str)  # serialize date as string for Store
+            info = html.Div(f"✔ {len(df)} rows loaded from {filename}", className="data-info alert-success")
+            return df.to_json(date_format="iso", orient="split"), info
+        except Exception as e:
+            info = html.Div(f"❌ {e}", className="alert-error")
+            return None, info
+    return None, ""
+
+
+# ── Brand dropdown ─────────────────────────────────────────────────────────────
+@app.callback(
+    Output("brand-dd", "options"),
+    Output("brand-dd", "value"),
+    Input("store-df", "data"),
+)
+def update_brands(data):
+    if not data:
+        return [], None
+    df = pd.read_json(io.StringIO(data), orient="split")
+    brands = sorted(df["brand"].dropna().unique().tolist())
+    opts = [{"label": b, "value": b} for b in brands]
+    return opts, brands[0] if brands else None
+
+
+# ── Sub-brand dropdown ─────────────────────────────────────────────────────────
+@app.callback(
+    Output("subbrand-dd", "options"),
+    Output("subbrand-dd", "value"),
+    Input("brand-dd", "value"),
+    State("store-df", "data"),
+)
+def update_subbrands(brand, data):
+    if not data or not brand:
+        return [], None
+    df = pd.read_json(io.StringIO(data), orient="split")
+    sbs = sorted(df.loc[df["brand"] == brand, "sub_brand"].dropna().unique().tolist())
+    opts = [{"label": s, "value": s} for s in sbs]
+    return opts, sbs[0] if sbs else None
+
+
+# ── Filter badges ──────────────────────────────────────────────────────────────
+@app.callback(
+    Output("filter-badges", "children"),
+    Input("brand-dd", "value"),
+    Input("subbrand-dd", "value"),
+    Input("store-df", "data"),
+)
+def update_badges(brand, sub_brand, data):
+    if not (brand and sub_brand and data):
+        return []
+    df = pd.read_json(io.StringIO(data), orient="split")
+    mask = (df["brand"] == brand) & (df["sub_brand"] == sub_brand)
+    n = mask.sum()
+    return [
+        html.Span(f"🏷️ Brand: {brand}",          className="filter-badge"),
+        html.Span(f"📦 Sub-Brand: {sub_brand}",   className="filter-badge"),
+        html.Span(f"📅 {n} obs",                  className="filter-badge"),
+    ]
+
+
+# ── Template download ──────────────────────────────────────────────────────────
+@app.callback(
+    Output("download-template", "data"),
+    Input("btn-template", "n_clicks"),
+    prevent_initial_call=True,
+)
+def download_template(n):
+    if not n:
+        raise PreventUpdate
+    return dcc.send_bytes(blank_template_bytes, "forecast_template.csv")
+
+
+# ── Tab content router ─────────────────────────────────────────────────────────
+@app.callback(
+    Output("tab-content", "children"),
+    Output("tab-content", "style"),
+    Output("tab-sarima-container", "style"),
+    Output("tab-aa-container", "style"),
+    Input("report-tabs", "value"),
+    Input("brand-dd", "value"),
+    Input("subbrand-dd", "value"),
+    Input("freq-dd", "value"),
+    State("store-df", "data"),
+)
+def render_tab(tab, brand, sub_brand, freq, data):
+    show_fast = {"display": "block"}
+    show_sar  = {"display": "block"} if tab == "tab-sarima" else {"display": "none"}
+    show_aa   = {"display": "block"} if tab == "tab-auto-arima" else {"display": "none"}
+    hide_fast = {"display": "none"}
+
+    if tab in ["tab-sarima", "tab-auto-arima"]:
+        return dash.no_update, hide_fast, show_sar, show_aa
+
+    if not (data and brand and sub_brand and freq):
+        err = html.Div("⚠️ Please load data and select Brand / Sub-Brand from the sidebar.", className="alert-warning")
+        return err, show_fast, show_sar, show_aa
+    try:
+        df = pd.read_json(io.StringIO(data), orient="split")
+        series = get_series(df, brand, sub_brand, freq)
+    except Exception as e:
+        err = html.Div(f"❌ Error loading data: {e}", className="alert-error")
+        return err, show_fast, show_sar, show_aa
+
+    if tab == "tab-overview":
+        content = overview_tab(df, series, brand, sub_brand)
+    elif tab == "tab-ma":
+        content = ma_tab()
+    elif tab == "tab-ses":
+        content = ses_tab()
+    elif tab == "tab-holt":
+        content = holt_tab()
+    elif tab == "tab-hw":
+        content = hw_tab()
+    elif tab == "tab-decomp":
+        content = decomp_tab(series)
+    else:
+        content = html.Div("Unknown tab.")
     
-    st.subheader(f"Qty Over Time — {selected_brand} / {selected_sub_brand}")
+    return content, show_fast, show_sar, show_aa
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB LAYOUTS (static controls — charts rendered via model callbacks)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def overview_tab(df, series, brand, sub_brand):
+    n   = len(series.dropna())
+    mn  = series.min()
+    mx  = series.max()
+    avg = series.mean()
+
+    # Time series chart
     fig0 = go.Figure()
-    fig0.add_trace(go.Scatter(
-        x=series.index, y=series.values,
-        mode="lines+markers",
-        line=dict(color=COLORS["actual"], width=2),
-        marker=dict(size=6), name="Qty",
-    ))
-    fig0.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(255,255,255,0.02)",
-        xaxis=dict(gridcolor="rgba(255,255,255,0.05)", color="#f8fafc"),
-        yaxis=dict(gridcolor="rgba(255,255,255,0.05)", color="#f8fafc", title="Quantity"),
-        hovermode="x unified", height=380,
-        margin=dict(t=20, b=40, l=50, r=20),
-    )
-    st.plotly_chart(fig0, use_container_width=True)
+    fig0.add_trace(go.Scatter(x=series.index, y=series.values,
+                              mode="lines+markers",
+                              line=dict(color=COLORS["actual"], width=2),
+                              marker=dict(size=6), name="Qty"))
+    fig0.update_layout(**dark_layout_kwargs(height=380,
+                                            title_text=f"Qty Over Time — {brand} / {sub_brand}"))
 
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.markdown("**Descriptive Statistics**")
-        st.dataframe(series.describe().rename("Qty").to_frame()
-                     .style.format("{:.2f}"), use_container_width=True)
-    with col_b:
-        st.markdown("**Raw Data (last 24)**")
-        df_show = series.tail(24).reset_index()
-        df_show.columns = ["Date", "Qty"]
-        df_show["Date"] = df_show["Date"].dt.strftime("%Y-%m-%d")
-        st.dataframe(df_show, use_container_width=True, hide_index=True)
-
-    st.markdown("---")
-    st.subheader(f"All Sub-Brands of '{selected_brand}'")
-    palette = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
+    # Sub-brand comparison
+    sub_brands = sorted(df.loc[df["brand"] == brand, "sub_brand"].dropna().unique().tolist())
     fig_cmp = go.Figure()
     for i, sb in enumerate(sub_brands):
-        m = (raw_df["brand"] == selected_brand) & (raw_df["sub_brand"] == sb)
-        s_ = raw_df[m].sort_values("date").set_index("date")["qty"]
+        m_ = (df["brand"] == brand) & (df["sub_brand"] == sb)
+        s_ = df[m_].sort_values("date").set_index("date")["qty"]
         fig_cmp.add_trace(go.Scatter(
             x=s_.index, y=s_.values, name=sb, mode="lines",
-            line=dict(color=palette[i % len(palette)], width=2),
+            line=dict(color=PALETTE[i % len(PALETTE)], width=2),
         ))
-    fig_cmp.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(255,255,255,0.02)",
-        xaxis=dict(gridcolor="rgba(255,255,255,0.05)", color="#f8fafc"),
-        yaxis=dict(gridcolor="rgba(255,255,255,0.05)", color="#f8fafc"),
-        legend=dict(bgcolor="rgba(0,0,0,0.5)", font=dict(color="#f8fafc")),
-        hovermode="x unified", height=380,
-        margin=dict(t=20, b=40, l=50, r=20),
-    )
-    st.plotly_chart(fig_cmp, use_container_width=True)
+    fig_cmp.update_layout(**dark_layout_kwargs(height=380,
+                                               title_text=f"All Sub-Brands of '{brand}'"))
+
+    # Stats table
+    stats = series.describe().reset_index()
+    stats.columns = ["Stat", "Qty"]
+    stats["Qty"] = stats["Qty"].round(2)
+
+    # Raw last-24 table
+    raw24 = series.tail(24).reset_index()
+    raw24.columns = ["Date", "Qty"]
+    raw24["Date"] = raw24["Date"].astype(str)
+
+    return html.Div([
+        html.Div([
+            html.Div([html.H3(["OBSERVATIONS ", html.Span("ℹ️", title=METRIC_HINTS.get("OBSERVATIONS",""), style={"cursor": "help", "opacity": 0.6})]), html.H2(str(n))],   className="metric-card"),
+            html.Div([html.H3(["MIN QTY ", html.Span("ℹ️", title=METRIC_HINTS.get("MIN QTY",""), style={"cursor": "help", "opacity": 0.6})]),      html.H2(f"{mn:,.0f}")],  className="metric-card"),
+            html.Div([html.H3(["MAX QTY ", html.Span("ℹ️", title=METRIC_HINTS.get("MAX QTY",""), style={"cursor": "help", "opacity": 0.6})]),      html.H2(f"{mx:,.0f}")],  className="metric-card"),
+            html.Div([html.H3(["MEAN QTY ", html.Span("ℹ️", title=METRIC_HINTS.get("MEAN QTY",""), style={"cursor": "help", "opacity": 0.6})]),     html.H2(f"{avg:,.1f}")], className="metric-card"),
+        ], className="metrics-grid"),
+        dcc.Graph(figure=fig0, config={"displayModeBar": False}),
+        html.Div([
+            html.Div([
+                html.H4("Descriptive Statistics", className="sub-head"),
+                dash_table.DataTable(
+                    data=stats.to_dict("records"),
+                    columns=[{"name": c, "id": c} for c in stats.columns],
+                    style_header={"backgroundColor": "#374151", "color": "#94a3b8",
+                                  "fontWeight": "600", "fontSize": "0.78rem"},
+                    style_data={"backgroundColor": "#1f2937", "color": "#e2e8f0",
+                                "fontSize": "0.85rem"},
+                    style_cell={"border": "1px solid rgba(255,255,255,0.08)"},
+                ),
+            ], style={"flex": "1"}),
+            html.Div([
+                html.H4("Raw Data (last 24)", className="sub-head"),
+                dash_table.DataTable(
+                    data=raw24.to_dict("records"),
+                    columns=[{"name": c, "id": c} for c in raw24.columns],
+                    style_header={"backgroundColor": "#374151", "color": "#94a3b8",
+                                  "fontWeight": "600", "fontSize": "0.78rem"},
+                    style_data={"backgroundColor": "#1f2937", "color": "#e2e8f0",
+                                "fontSize": "0.85rem"},
+                    style_cell={"border": "1px solid rgba(255,255,255,0.08)"},
+                    page_size=12,
+                ),
+            ], style={"flex": "1"}),
+        ], style={"display": "flex", "gap": "24px", "marginTop": "16px"}),
+        dcc.Graph(figure=fig_cmp, config={"displayModeBar": False}, style={"marginTop": "24px"}),
+    ])
 
 
-# ── 📉 Moving Average ─────────────────────────────────────────────────────────
-with tabs[1]:
-    st.subheader("Moving Average")
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        periods = st.number_input("Forecast Periods", 1, 36, 12, key="ma_p")
-        ma_window = st.number_input("Window", 2, 24, 3, key="ma_w")
-    with col2:
-        st.caption("Settings configured here apply only to this model.")
-        
-    st.markdown("---")
-    render_standard_forecast(
-        "Moving Average", fc.moving_average, series, periods,
-        extra_kwargs={"window": ma_window}, btn_key="ma",
-    )
+def settings_row(*items):
+    """Wrap settings items in a flex row."""
+    return html.Div(items, className="settings-row")
 
 
-# ── 🔵 SES ───────────────────────────────────────────────────────────────────
-with tabs[2]:
-    st.subheader("Simple Exponential Smoothing")
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        periods = st.number_input("Forecast Periods", 1, 36, 12, key="ses_p")
-        alpha = st.slider("Alpha (α)", 0.01, 0.99, 0.3, key="ses_alpha")
-        
-    st.markdown("---")
-    render_standard_forecast(
-        "SES", fc.ses_forecast, series, periods,
-        extra_kwargs={"alpha": alpha}, btn_key="ses",
-    )
+def setting(label, component):
+    return html.Div([html.Label(label), component], className="settings-item")
 
 
-# ── 📐 Holt's Linear ─────────────────────────────────────────────────────────
-with tabs[3]:
-    st.subheader("Holt's Linear Trend")
-    periods = st.number_input("Forecast Periods", 1, 36, 12, key="holt_p")
-    st.markdown("---")
-    render_standard_forecast("Holt's Linear", fc.holt_forecast, series, periods,
-                             btn_key="holt")
+# ── Moving Average tab layout ──────────────────────────────────────────────────
+def ma_tab():
+    return html.Div([
+        html.H3("Moving Average", className="section-head"),
+        settings_row(
+            setting("Forecast Periods", dcc.Input(id="ma-periods", type="number", value=12, min=1, max=36, step=1)),
+            setting("Window Size",      dcc.Input(id="ma-window",  type="number", value=3,  min=2, max=24, step=1)),
+        ),
+        html.Hr(),
+        html.Div(id="ma-output"),
+        dcc.Download(id="ma-download"),
+    ])
 
 
-# ── ❄️ Holt-Winters ──────────────────────────────────────────────────────────
-with tabs[4]:
-    st.subheader("Holt-Winters (Triple Exponential Smoothing)")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        periods = st.number_input("Forecast Periods", 1, 36, 12, key="hw_p")
-    with col2:
-        seasonal_periods = st.number_input("Seasonal Periods", 4, 52, 12, key="hw_sp")
-    with col3:
-        hw_trend    = st.selectbox("Trend",   ["add", "mul", None], index=0, key="hw_t")
-        hw_seasonal = st.selectbox("Seasonal", ["add", "mul"],       index=0, key="hw_s")
-        
-    st.markdown("---")
-    render_standard_forecast(
-        "Holt-Winters", fc.holtwinters_forecast, series, periods,
-        extra_kwargs={"seasonal_periods": seasonal_periods,
-                      "trend": hw_trend, "seasonal": hw_seasonal},
-        btn_key="hw",
-    )
+# ── SES tab layout ─────────────────────────────────────────────────────────────
+def ses_tab():
+    return html.Div([
+        html.H3("Simple Exponential Smoothing (SES)", className="section-head"),
+        settings_row(
+            setting("Forecast Periods", dcc.Input(id="ses-periods", type="number", value=12, min=1, max=36, step=1)),
+            setting("Alpha (α)",        html.Div([
+                dcc.Slider(id="ses-alpha", min=0.01, max=0.99, step=0.01, value=0.3,
+                           marks={0.1: "0.1", 0.3: "0.3", 0.5: "0.5", 0.7: "0.7", 0.99: "0.99"},
+                           tooltip={"placement": "bottom", "always_visible": True}),
+            ], style={"width": "220px", "paddingTop": "4px"})),
+        ),
+        html.Hr(),
+        html.Div(id="ses-output"),
+        dcc.Download(id="ses-download"),
+    ])
 
 
-# ── 🤖 SARIMA ────────────────────────────────────────────────────────────────
-with tabs[5]:
-    st.subheader("SARIMA")
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        periods = st.number_input("Forecast", 1, 36, 12, key="sar_p")
-        seasonal_periods = st.number_input("Season", 4, 52, 12, key="sar_sp")
-    with col2:
-        p = st.number_input("p", 0, 3, 1, step=1, key="sar_p_val")
-        P = st.number_input("P", 0, 2, 1, step=1, key="sar_P_val")
-    with col3:
-        d = st.number_input("d", 0, 2, 1, step=1, key="sar_d_val")
-        D = st.number_input("D", 0, 2, 1, step=1, key="sar_D_val")
-    with col4:
-        q = st.number_input("q", 0, 3, 1, step=1, key="sar_q_val")
-        Q = st.number_input("Q", 0, 2, 1, step=1, key="sar_Q_val")
-        
-    sarima_label = f"SARIMA ({p},{d},{q})×({P},{D},{Q},{seasonal_periods})"
-    st.markdown("---")
-    render_standard_forecast(
-        sarima_label, fc.sarima_forecast, series, periods,
-        extra_kwargs={"order": (int(p), int(d), int(q)),
-                      "seasonal_order": (int(P), int(D), int(Q), seasonal_periods)},
-        needs_button=True, btn_key="sarima",
-    )
+# ── Holt tab layout ────────────────────────────────────────────────────────────
+def holt_tab():
+    return html.Div([
+        html.H3("Holt's Linear Trend", className="section-head"),
+        settings_row(
+            setting("Forecast Periods", dcc.Input(id="holt-periods", type="number", value=12, min=1, max=36, step=1)),
+        ),
+        html.Hr(),
+        html.Div(id="holt-output"),
+        dcc.Download(id="holt-download"),
+    ])
 
 
-# ── 🔮 Auto ARIMA ────────────────────────────────────────────────────────────
-with tabs[6]:
-    st.subheader("Auto ARIMA — Automatic Order Selection")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        periods = st.number_input("Forecast Periods", 1, 36, 12, key="aa_p")
-        aa_m = st.number_input("Seasonal Period (m)", 1, 52, 12, step=1, key="aa_m")
-    with col2:
-        aa_criterion = st.selectbox("Information Criterion", ["aic", "bic", "aicc", "oob"], key="aa_crit")
-    with col3:
-        st.write("")
-        st.write("")
-        aa_seasonal  = st.checkbox("Include Seasonal", value=True, key="aa_seas")
-        aa_stepwise  = st.checkbox("Stepwise Search", value=True, key="aa_step")
-        
-    st.markdown("---")
-    if st.button("🚀 Run Auto ARIMA", key="btn_auto_arima"):
-        with st.spinner("Searching for best ARIMA order..."):
-            try:
-                result_aa = fc.auto_arima_forecast(
-                    series,
-                    seasonal=aa_seasonal,
-                    m=int(aa_m),
-                    periods=periods,
-                    stepwise=aa_stepwise,
-                    information_criterion=aa_criterion,
-                )
-                st.success(f"✅ {result_aa['order_str']}")
-
-                o, so = result_aa["order"], result_aa["seasonal_order"]
-                order_label = (
-                    f"ARIMA({o[0]},{o[1]},{o[2]})×({so[0]},{so[1]},{so[2]},{so[3]})"
-                    if aa_seasonal else f"ARIMA({o[0]},{o[1]},{o[2]})"
-                )
-                met = result_aa["metrics"]
-                st.markdown(
-                    f'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">'
-                    f'<div class="metric-card"><h3>Best Order</h3>'
-                    f'<h2 style="font-size:1.05rem;margin-top:8px">{order_label}</h2></div>'
-                    f'<div class="metric-card"><h3>MAE</h3><h2>{met["MAE"]}</h2></div>'
-                    f'<div class="metric-card"><h3>RMSE</h3><h2>{met["RMSE"]}</h2></div>'
-                    f'<div class="metric-card"><h3>MAPE (%)</h3><h2>{met["MAPE (%)"]}</h2></div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-                st.plotly_chart(
-                    make_forecast_figure(series, result_aa,
-                                         f"Auto ARIMA {order_label} — {periods}-Period Forecast"),
-                    use_container_width=True,
-                )
-                fc_df = pd.DataFrame({
-                    "Forecast": result_aa["forecast"],
-                    "Lower 95%": result_aa["lower"],
-                    "Upper 95%": result_aa["upper"],
-                })
-                with st.expander("📋 Forecast Table"):
-                    st.dataframe(fc_df.style.format("{:.2f}"), use_container_width=True)
-                st.download_button(
-                    "⬇️ Download Forecast (Excel)", to_excel_bytes(fc_df),
-                    "auto_arima_forecast.xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="dl_auto_arima",
-                )
-                with st.expander("📄 Auto ARIMA Model Summary"):
-                    st.code(result_aa["summary"], language="text")
-            except Exception as e:
-                st.error(f"Auto ARIMA failed: {e}")
-    else:
-        st.info("📌 Adjust parameters above, then click **Run Auto ARIMA**.")
+# ── Holt-Winters tab layout ────────────────────────────────────────────────────
+def hw_tab():
+    return html.Div([
+        html.H3("Holt-Winters (Triple Exponential Smoothing)", className="section-head"),
+        settings_row(
+            setting("Forecast Periods",  dcc.Input(id="hw-periods", type="number", value=12,  min=1,  max=36, step=1)),
+            setting("Seasonal Periods",  dcc.Input(id="hw-sp",      type="number", value=12,  min=4,  max=52, step=1)),
+            setting("Trend",             dcc.Dropdown(id="hw-trend",    options=["add","mul","None"], value="add", clearable=False, style={"width": "100px"})),
+            setting("Seasonal",          dcc.Dropdown(id="hw-seasonal", options=["add","mul"],        value="add", clearable=False, style={"width": "100px"})),
+        ),
+        html.Hr(),
+        html.Div(id="hw-output"),
+        dcc.Download(id="hw-download"),
+    ])
 
 
-# ── 🔀 Decomposition ─────────────────────────────────────────────────────────
-with tabs[7]:
-    st.subheader(f"Seasonal Decomposition")
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        seasonal_periods = st.number_input("Seasonal Periods", 4, 52, 12, key="decomp_sp")
-        decomp_model = st.selectbox("Model", ["additive", "multiplicative"], key="decomp_model")
-        
-    st.markdown("---")
-    with st.spinner("Decomposing..."):
-        try:
-            clean = series.dropna()
-            if len(clean) < seasonal_periods * 2:
-                st.warning(f"Need at least {seasonal_periods * 2} observations.")
-            else:
-                decomp = fc.decompose_series(clean, model=decomp_model,
-                                             period=seasonal_periods)
-                st.plotly_chart(make_decomp_figure(decomp), use_container_width=True)
-                strength_t = max(0, 1 - decomp.resid.var() /
-                                 (decomp.trend.dropna() + decomp.resid.dropna()).var())
-                strength_s = max(0, 1 - decomp.resid.var() /
-                                 (decomp.seasonal + decomp.resid.dropna()).var())
-                st.markdown(metrics_html({
-                    "Trend Strength":    round(float(strength_t), 3),
-                    "Seasonal Strength": round(float(strength_s), 3),
-                    "Residual Std":      round(float(decomp.resid.std()), 3),
-                }), unsafe_allow_html=True)
-        except Exception as e:
-            st.error(f"Decomposition error: {e}")
+# ── SARIMA tab layout ──────────────────────────────────────────────────────────
+def sarima_tab():
+    def num(id_, val):
+        return dcc.Input(id=id_, type="number", value=val, min=0, max=5, step=1)
+    return html.Div([
+        html.H3("SARIMA", className="section-head"),
+        settings_row(
+            setting("Forecast",  dcc.Input(id="sar-periods", type="number", value=12, min=1, max=36, step=1)),
+            setting("Season (s)", dcc.Input(id="sar-sp",      type="number", value=12, min=4, max=52, step=1)),
+            setting("p",  num("sar-p", 1)), setting("d",  num("sar-d", 1)), setting("q",  num("sar-q", 1)),
+            setting("P",  num("sar-P", 1)), setting("D",  num("sar-D", 1)), setting("Q",  num("sar-Q", 1)),
+        ),
+        html.Div(id="sarima-order-label", style={"color": "#94a3b8", "fontSize": "0.85rem", "marginBottom": "10px"}),
+        html.Hr(),
+        html.Button("🚀 Run SARIMA", id="btn-sarima", className="btn-primary"),
+        dcc.Loading(
+            html.Div(id="sarima-output", style={"marginTop": "18px"}),
+            type="dot", color="#6366f1"
+        ),
+        dcc.Download(id="sarima-download"),
+    ])
+
+
+# ── Auto ARIMA tab layout ──────────────────────────────────────────────────────
+def auto_arima_tab():
+    return html.Div([
+        html.H3("Auto ARIMA — Automatic Order Selection", className="section-head"),
+        settings_row(
+            setting("Forecast Periods",      dcc.Input(id="aa-periods", type="number", value=12, min=1, max=36, step=1)),
+            setting("Seasonal Period (m)",   dcc.Input(id="aa-m",       type="number", value=12, min=1, max=52, step=1)),
+            setting("Information Criterion", dcc.Dropdown(id="aa-criterion",
+                                                          options=["aic","bic","aicc","oob"],
+                                                          value="aic", clearable=False,
+                                                          style={"width": "110px"})),
+            setting("Options", html.Div([
+                dcc.Checklist(id="aa-options",
+                              options=[{"label": " Include Seasonal", "value": "seasonal"},
+                                       {"label": " Stepwise Search",  "value": "stepwise"}],
+                              value=["seasonal","stepwise"],
+                              className="checkbox-group",
+                              labelStyle={"display": "block", "marginBottom": "4px"}),
+            ])),
+        ),
+        html.Hr(),
+        html.Button("🚀 Run Auto ARIMA", id="btn-auto-arima", className="btn-primary"),
+        dcc.Loading(
+            html.Div(id="auto-arima-output", style={"marginTop": "18px"}),
+            type="dot", color="#6366f1"
+        ),
+        dcc.Download(id="auto-arima-download"),
+    ])
+
+
+# ── Decomposition tab layout ───────────────────────────────────────────────────
+def decomp_tab(series):
+    return html.Div([
+        html.H3("Seasonal Decomposition", className="section-head"),
+        settings_row(
+            setting("Seasonal Periods", dcc.Input(id="decomp-sp",    type="number", value=12, min=4, max=52, step=1)),
+            setting("Model",            dcc.Dropdown(id="decomp-model",
+                                                     options=["additive","multiplicative"],
+                                                     value="additive", clearable=False,
+                                                     style={"width": "150px"})),
+        ),
+        html.Hr(),
+        html.Div(id="decomp-output"),
+    ])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FOOTER
+# MODEL CALLBACKS
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.markdown("---")
-st.markdown(
-    '<p style="text-align:center;color:#555;font-size:0.8rem;">'
-    "Python Forecasting App · Template: date | brand | sub_brand | qty"
-    "</p>",
-    unsafe_allow_html=True,
+def _get_series_from_state(brand, sub_brand, freq, data):
+    df = pd.read_json(io.StringIO(data), orient="split")
+    return get_series(df, brand, sub_brand, freq)
+
+
+# ── Moving Average ─────────────────────────────────────────────────────────────
+@app.callback(
+    Output("ma-output", "children"),
+    Input("ma-periods", "value"),
+    Input("ma-window",  "value"),
+    Input("brand-dd",    "value"),
+    Input("subbrand-dd", "value"),
+    Input("freq-dd",     "value"),
+    State("store-df",    "data"),
+)
+def run_ma(periods, window, brand, sub_brand, freq, data):
+    if not all([data, brand, sub_brand, freq, periods, window]):
+        return html.Div("Configure settings above.", className="alert-info")
+    try:
+        series = _get_series_from_state(brand, sub_brand, freq, data)
+        result = fc.moving_average(series, periods=int(periods), window=int(window))
+        return forecast_div(series, result, "Moving Average", periods, "btn-ma-dl")
+    except Exception as e:
+        return html.Div(f"❌ Error: {e}", className="alert-error")
+
+
+@app.callback(
+    Output("ma-download", "data"),
+    Input("btn-ma-dl", "n_clicks"),
+    State("ma-periods",  "value"),
+    State("ma-window",   "value"),
+    State("brand-dd",    "value"),
+    State("subbrand-dd", "value"),
+    State("freq-dd",     "value"),
+    State("store-df",    "data"),
+    prevent_initial_call=True,
+)
+def dl_ma(n, periods, window, brand, sub_brand, freq, data):
+    if not n:
+        raise PreventUpdate
+    series = _get_series_from_state(brand, sub_brand, freq, data)
+    result = fc.moving_average(series, periods=int(periods), window=int(window))
+    fc_df = pd.DataFrame({"Forecast": result["forecast"], "Lower 95%": result["lower"], "Upper 95%": result["upper"]})
+    return dcc.send_bytes(lambda _=None: to_excel_bytes(fc_df), "ma_forecast.xlsx")
+
+
+# ── SES ────────────────────────────────────────────────────────────────────────
+@app.callback(
+    Output("ses-output", "children"),
+    Input("ses-periods", "value"),
+    Input("ses-alpha",   "value"),
+    Input("brand-dd",    "value"),
+    Input("subbrand-dd", "value"),
+    Input("freq-dd",     "value"),
+    State("store-df",    "data"),
+)
+def run_ses(periods, alpha, brand, sub_brand, freq, data):
+    if not all([data, brand, sub_brand, freq, periods]):
+        return html.Div("Configure settings above.", className="alert-info")
+    try:
+        series = _get_series_from_state(brand, sub_brand, freq, data)
+        result = fc.ses_forecast(series, periods=int(periods), alpha=float(alpha or 0.3))
+        return forecast_div(series, result, "SES", periods, "btn-ses-dl")
+    except Exception as e:
+        return html.Div(f"❌ Error: {e}", className="alert-error")
+
+
+@app.callback(
+    Output("ses-download", "data"),
+    Input("btn-ses-dl",  "n_clicks"),
+    State("ses-periods", "value"),
+    State("ses-alpha",   "value"),
+    State("brand-dd",    "value"),
+    State("subbrand-dd", "value"),
+    State("freq-dd",     "value"),
+    State("store-df",    "data"),
+    prevent_initial_call=True,
+)
+def dl_ses(n, periods, alpha, brand, sub_brand, freq, data):
+    if not n:
+        raise PreventUpdate
+    series = _get_series_from_state(brand, sub_brand, freq, data)
+    result = fc.ses_forecast(series, periods=int(periods), alpha=float(alpha or 0.3))
+    fc_df = pd.DataFrame({"Forecast": result["forecast"], "Lower 95%": result["lower"], "Upper 95%": result["upper"]})
+    return dcc.send_bytes(lambda _=None: to_excel_bytes(fc_df), "ses_forecast.xlsx")
+
+
+# ── Holt ───────────────────────────────────────────────────────────────────────
+@app.callback(
+    Output("holt-output", "children"),
+    Input("holt-periods", "value"),
+    Input("brand-dd",     "value"),
+    Input("subbrand-dd",  "value"),
+    Input("freq-dd",      "value"),
+    State("store-df",     "data"),
+)
+def run_holt(periods, brand, sub_brand, freq, data):
+    if not all([data, brand, sub_brand, freq, periods]):
+        return html.Div("Configure settings above.", className="alert-info")
+    try:
+        series = _get_series_from_state(brand, sub_brand, freq, data)
+        result = fc.holt_forecast(series, periods=int(periods))
+        return forecast_div(series, result, "Holt's Linear", periods, "btn-holt-dl")
+    except Exception as e:
+        return html.Div(f"❌ Error: {e}", className="alert-error")
+
+
+@app.callback(
+    Output("holt-download", "data"),
+    Input("btn-holt-dl",  "n_clicks"),
+    State("holt-periods", "value"),
+    State("brand-dd",     "value"),
+    State("subbrand-dd",  "value"),
+    State("freq-dd",      "value"),
+    State("store-df",     "data"),
+    prevent_initial_call=True,
+)
+def dl_holt(n, periods, brand, sub_brand, freq, data):
+    if not n:
+        raise PreventUpdate
+    series = _get_series_from_state(brand, sub_brand, freq, data)
+    result = fc.holt_forecast(series, periods=int(periods))
+    fc_df = pd.DataFrame({"Forecast": result["forecast"], "Lower 95%": result["lower"], "Upper 95%": result["upper"]})
+    return dcc.send_bytes(lambda _=None: to_excel_bytes(fc_df), "holt_forecast.xlsx")
+
+
+# ── Holt-Winters ───────────────────────────────────────────────────────────────
+@app.callback(
+    Output("hw-output", "children"),
+    Input("hw-periods",  "value"),
+    Input("hw-sp",       "value"),
+    Input("hw-trend",    "value"),
+    Input("hw-seasonal", "value"),
+    Input("brand-dd",    "value"),
+    Input("subbrand-dd", "value"),
+    Input("freq-dd",     "value"),
+    State("store-df",    "data"),
+)
+def run_hw(periods, sp, trend, seasonal, brand, sub_brand, freq, data):
+    if not all([data, brand, sub_brand, freq, periods, sp]):
+        return html.Div("Configure settings above.", className="alert-info")
+    try:
+        series = _get_series_from_state(brand, sub_brand, freq, data)
+        t = None if trend == "None" else trend
+        result = fc.holtwinters_forecast(series, periods=int(periods),
+                                         seasonal_periods=int(sp),
+                                         trend=t, seasonal=seasonal)
+        return forecast_div(series, result, "Holt-Winters", periods, "btn-hw-dl")
+    except Exception as e:
+        return html.Div(f"❌ Error: {e}", className="alert-error")
+
+
+@app.callback(
+    Output("hw-download", "data"),
+    Input("btn-hw-dl",   "n_clicks"),
+    State("hw-periods",  "value"),
+    State("hw-sp",       "value"),
+    State("hw-trend",    "value"),
+    State("hw-seasonal", "value"),
+    State("brand-dd",    "value"),
+    State("subbrand-dd", "value"),
+    State("freq-dd",     "value"),
+    State("store-df",    "data"),
+    prevent_initial_call=True,
+)
+def dl_hw(n, periods, sp, trend, seasonal, brand, sub_brand, freq, data):
+    if not n:
+        raise PreventUpdate
+    series = _get_series_from_state(brand, sub_brand, freq, data)
+    t = None if trend == "None" else trend
+    result = fc.holtwinters_forecast(series, periods=int(periods), seasonal_periods=int(sp),
+                                     trend=t, seasonal=seasonal)
+    fc_df = pd.DataFrame({"Forecast": result["forecast"], "Lower 95%": result["lower"], "Upper 95%": result["upper"]})
+    return dcc.send_bytes(lambda _=None: to_excel_bytes(fc_df), "hw_forecast.xlsx")
+
+
+# ── SARIMA ─────────────────────────────────────────────────────────────────────
+@app.callback(
+    Output("sarima-order-label", "children"),
+    Input("sar-p", "value"), Input("sar-d", "value"), Input("sar-q", "value"),
+    Input("sar-P", "value"), Input("sar-D", "value"), Input("sar-Q", "value"),
+    Input("sar-sp", "value"),
+)
+def update_sarima_label(p, d, q, P, D, Q, sp):
+    return f"SARIMA ({p},{d},{q})×({P},{D},{Q},{sp})"
+
+
+@app.callback(
+    Output("sarima-output", "children"),
+    Output("btn-sarima", "children", allow_duplicate=True),
+    Output("btn-sarima", "disabled", allow_duplicate=True),
+    Input("btn-sarima",  "n_clicks"),
+    State("sar-periods", "value"),
+    State("sar-sp",      "value"),
+    State("sar-p",       "value"), State("sar-d", "value"), State("sar-q", "value"),
+    State("sar-P",       "value"), State("sar-D", "value"), State("sar-Q", "value"),
+    State("brand-dd",    "value"),
+    State("subbrand-dd", "value"),
+    State("freq-dd",     "value"),
+    State("store-df",    "data"),
+    prevent_initial_call=True,
+)
+def run_sarima(n, periods, sp, p, d, q, P, D, Q, brand, sub_brand, freq, data):
+    reset_args = ("🚀 Run SARIMA", False)
+    if not all([data, brand, sub_brand, freq]):
+        err = html.Div("Load data first.", className="alert-info")
+        return err, *reset_args
+    try:
+        series = _get_series_from_state(brand, sub_brand, freq, data)
+        order = (int(p), int(d), int(q))
+        seasonal_order = (int(P), int(D), int(Q), int(sp))
+        label = f"SARIMA {order}×{seasonal_order}"
+        result = fc.sarima_forecast(series, periods=int(periods),
+                                    order=order, seasonal_order=seasonal_order)
+        children = [forecast_div(series, result, label, periods, "btn-sarima-dl")]
+        if "summary" in result:
+            children.append(html.Details([
+                html.Summary("📄 Model Summary", style={"cursor": "pointer", "color": "#94a3b8"}),
+                html.Pre(result["summary"], style={"backgroundColor": "#111827", "padding": "12px",
+                                                   "borderRadius": "8px", "color": "#94a3b8",
+                                                   "fontSize": "0.78rem", "overflow": "auto",
+                                                   "marginTop": "10px"}),
+            ]))
+        return html.Div(children), *reset_args
+    except Exception as e:
+        err = html.Div(f"❌ SARIMA Error: {e}", className="alert-error")
+        return err, *reset_args
+
+
+@app.callback(
+    Output("sarima-download", "data"),
+    Input("btn-sarima-dl", "n_clicks"),
+    State("sar-periods", "value"),
+    State("sar-sp",      "value"),
+    State("sar-p", "value"), State("sar-d", "value"), State("sar-q", "value"),
+    State("sar-P", "value"), State("sar-D", "value"), State("sar-Q", "value"),
+    State("brand-dd",    "value"),
+    State("subbrand-dd", "value"),
+    State("freq-dd",     "value"),
+    State("store-df",    "data"),
+    prevent_initial_call=True,
+)
+def dl_sarima(n, periods, sp, p, d, q, P, D, Q, brand, sub_brand, freq, data):
+    if not n:
+        raise PreventUpdate
+    series = _get_series_from_state(brand, sub_brand, freq, data)
+    result = fc.sarima_forecast(series, periods=int(periods),
+                                order=(int(p), int(d), int(q)),
+                                seasonal_order=(int(P), int(D), int(Q), int(sp)))
+    fc_df = pd.DataFrame({"Forecast": result["forecast"], "Lower 95%": result["lower"], "Upper 95%": result["upper"]})
+    return dcc.send_bytes(lambda _=None: to_excel_bytes(fc_df), "sarima_forecast.xlsx")
+
+
+# ── Auto ARIMA ─────────────────────────────────────────────────────────────────
+@app.callback(
+    Output("auto-arima-output", "children"),
+    Output("btn-auto-arima", "children", allow_duplicate=True),
+    Output("btn-auto-arima", "disabled", allow_duplicate=True),
+    Input("btn-auto-arima", "n_clicks"),
+    State("aa-periods",    "value"),
+    State("aa-m",          "value"),
+    State("aa-criterion",  "value"),
+    State("aa-options",    "value"),
+    State("brand-dd",      "value"),
+    State("subbrand-dd",   "value"),
+    State("freq-dd",       "value"),
+    State("store-df",      "data"),
+    prevent_initial_call=True,
+)
+def run_auto_arima(n, periods, m, criterion, options, brand, sub_brand, freq, data):
+    reset_args = ("🚀 Run Auto ARIMA", False)
+    if not all([data, brand, sub_brand, freq]):
+        err = html.Div("Load data first.", className="alert-info")
+        return err, *reset_args
+    try:
+        series = _get_series_from_state(brand, sub_brand, freq, data)
+        seasonal  = "seasonal"  in (options or [])
+        stepwise  = "stepwise"  in (options or [])
+        result    = fc.auto_arima_forecast(
+            series, periods=int(periods), seasonal=seasonal,
+            m=int(m or 12), stepwise=stepwise, information_criterion=criterion or "aic",
+        )
+        o, so     = result["order"], result["seasonal_order"]
+        order_str = (f"ARIMA({o[0]},{o[1]},{o[2]})×({so[0]},{so[1]},{so[2]},{so[3]})"
+                     if seasonal else f"ARIMA({o[0]},{o[1]},{o[2]})")
+        label     = f"Auto ARIMA {order_str}"
+        children  = [
+            html.Div(f"✅ Best order: {order_str}", className="alert-success"),
+            forecast_div(series, result, label, periods, "btn-aa-dl"),
+        ]
+        if "summary" in result:
+            children.append(html.Details([
+                html.Summary("📄 Auto ARIMA Summary",
+                             style={"cursor": "pointer", "color": "#94a3b8"}),
+                html.Pre(result["summary"], style={"backgroundColor": "#111827", "padding": "12px",
+                                                   "borderRadius": "8px", "color": "#94a3b8",
+                                                   "fontSize": "0.78rem", "overflow": "auto",
+                                                   "marginTop": "10px"}),
+            ]))
+        return html.Div(children), *reset_args
+    except Exception as e:
+        err = html.Div(f"❌ Auto ARIMA Error: {e}", className="alert-error")
+        return err, *reset_args
+
+
+@app.callback(
+    Output("auto-arima-download", "data"),
+    Input("btn-aa-dl",     "n_clicks"),
+    State("aa-periods",    "value"),
+    State("aa-m",          "value"),
+    State("aa-criterion",  "value"),
+    State("aa-options",    "value"),
+    State("brand-dd",      "value"),
+    State("subbrand-dd",   "value"),
+    State("freq-dd",       "value"),
+    State("store-df",      "data"),
+    prevent_initial_call=True,
+)
+def dl_auto_arima(n, periods, m, criterion, options, brand, sub_brand, freq, data):
+    if not n:
+        raise PreventUpdate
+    series   = _get_series_from_state(brand, sub_brand, freq, data)
+    seasonal = "seasonal" in (options or [])
+    stepwise = "stepwise" in (options or [])
+    result   = fc.auto_arima_forecast(series, periods=int(periods), seasonal=seasonal,
+                                       m=int(m or 12), stepwise=stepwise,
+                                       information_criterion=criterion or "aic")
+    fc_df = pd.DataFrame({"Forecast": result["forecast"], "Lower 95%": result["lower"], "Upper 95%": result["upper"]})
+    return dcc.send_bytes(lambda _=None: to_excel_bytes(fc_df), "auto_arima_forecast.xlsx")
+
+
+# ── Decomposition ──────────────────────────────────────────────────────────────
+@app.callback(
+    Output("decomp-output", "children"),
+    Input("decomp-sp",    "value"),
+    Input("decomp-model", "value"),
+    Input("brand-dd",     "value"),
+    Input("subbrand-dd",  "value"),
+    Input("freq-dd",      "value"),
+    State("store-df",     "data"),
+)
+def run_decomp(sp, model, brand, sub_brand, freq, data):
+    if not all([data, brand, sub_brand, freq, sp]):
+        return html.Div("Configure settings above.", className="alert-info")
+    try:
+        series = _get_series_from_state(brand, sub_brand, freq, data)
+        clean  = series.dropna()
+        if len(clean) < int(sp) * 2:
+            return html.Div(f"⚠️ Need at least {int(sp)*2} observations.", className="alert-warning")
+        decomp = fc.decompose_series(clean, model=model, period=int(sp))
+        fig = make_subplots(rows=4, cols=1,
+                            subplot_titles=["Observed", "Trend", "Seasonal", "Residuals"],
+                            shared_xaxes=True, vertical_spacing=0.07)
+        for s_, color, row in [
+            (decomp.observed, COLORS["actual"],   1),
+            (decomp.trend,    COLORS["trend"],    2),
+            (decomp.seasonal, COLORS["seasonal"], 3),
+            (decomp.resid,    COLORS["resid"],    4),
+        ]:
+            fig.add_trace(go.Scatter(x=s_.index, y=s_.values, mode="lines",
+                                     line=dict(color=color, width=1.8), showlegend=False),
+                          row=row, col=1)
+        fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(255,255,255,0.03)",
+            height=680, margin=dict(t=30, b=30, l=50, r=20),
+            font=dict(family="Inter, sans-serif", color="#e8eaf6"),
+        )
+        for ax in fig.layout:
+            if "xaxis" in ax or "yaxis" in ax:
+                fig.layout[ax].update(gridcolor="rgba(255,255,255,0.08)", color="#a5b4fc")
+        for ann in fig.layout.annotations:
+            ann.font.color = "#a5b4fc"
+
+        strength_t = max(0.0, 1 - decomp.resid.var() /
+                         (decomp.trend.dropna() + decomp.resid.dropna()).var())
+        strength_s = max(0.0, 1 - decomp.resid.var() /
+                         (decomp.seasonal + decomp.resid.dropna()).var())
+
+        return html.Div([
+            dcc.Graph(figure=fig, config={"displayModeBar": False}),
+            html.Div([
+                html.Div([html.H3(["TREND STRENGTH ", html.Span("ℹ️", title=METRIC_HINTS["TREND STRENGTH"], style={"cursor": "help", "opacity": 0.6})]),    html.H2(f"{strength_t:.3f}")], className="metric-card"),
+                html.Div([html.H3(["SEASONAL STRENGTH ", html.Span("ℹ️", title=METRIC_HINTS["SEASONAL STRENGTH"], style={"cursor": "help", "opacity": 0.6})]), html.H2(f"{strength_s:.3f}")], className="metric-card"),
+                html.Div([html.H3(["RESIDUAL STD ", html.Span("ℹ️", title=METRIC_HINTS["RESIDUAL STD"], style={"cursor": "help", "opacity": 0.6})]),      html.H2(f"{decomp.resid.std():.3f}")], className="metric-card"),
+            ], className="metrics-grid", style={"marginTop": "12px"}),
+        ])
+    except Exception as e:
+        return html.Div(f"❌ Decomposition error: {e}", className="alert-error")
+
+
+# ── Loading UI (Client-Side) ───────────────────────────────────────────────────
+
+app.clientside_callback(
+    """function(n) { if(n) return ["⏳ Running SARIMA...", true]; return window.dash_clientside.no_update; }""",
+    Output("btn-sarima", "children"),Output("btn-sarima", "disabled"),
+    Input("btn-sarima", "n_clicks"), prevent_initial_call=True
 )
 
-if __name__ == "__main__":
-    import os
-    import sys
-    import streamlit.runtime as st_runtime
+app.clientside_callback(
+    """function(n) { if(n) return ["⏳ Running Auto ARIMA...", true]; return window.dash_clientside.no_update; }""",
+    Output("btn-auto-arima", "children"),Output("btn-auto-arima", "disabled"),
+    Input("btn-auto-arima", "n_clicks"), prevent_initial_call=True
+)
 
-    # Only launch a new Streamlit server if one isn't already running
-    if not st_runtime.exists():
-        print("\n   🚀 Starting Forecasting App...")
-        print("   🌐 View your app in your browser at: http://localhost:8501\n")
-        
-        # Run the streamlit application natively
-        os.system(f"{sys.executable} -m streamlit run {sys.argv[0]}")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RUN
+# ─────────────────────────────────────────────────────────────────────────────
+
+app.layout = html.Div(id="app-shell", children=[sidebar(), main_content()])
+
+if __name__ == "__main__":
+    print("\n   🚀 Starting Forecasting App (Dash)...")
+    print("   🌐 Open your browser: http://localhost:8050\n")
+    app.run(debug=False, port=8050, host="0.0.0.0")
